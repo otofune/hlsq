@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type StdIOLogger struct {
@@ -29,24 +30,25 @@ func (l *StdIOLogger) calleeLine() string {
 	return fmt.Sprintf("%s:%d", filePart[len(filePart)-1], line)
 }
 
-func (l *StdIOLogger) withCalleeLine(log func(format string, v ...interface{}), format string, args ...interface{}) {
-	margs := []interface{}{l.calleeLine()}
+func (l *StdIOLogger) withCommonPrefix(log func(format string, v ...interface{}), format string, args ...interface{}) {
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	margs := []interface{}{ts, l.calleeLine()}
 	margs = append(margs, args...)
-	log("%s: "+format, margs...)
+	log("%s %s: "+format, margs...)
 }
 
 func (l *StdIOLogger) Debugf(format string, args ...interface{}) {
-	l.withCalleeLine(l.stdout.Printf, format, args...)
+	l.withCommonPrefix(l.stdout.Printf, format, args...)
 }
 
 func (l *StdIOLogger) Printf(format string, args ...interface{}) {
-	l.withCalleeLine(l.stdout.Printf, format, args...)
+	l.withCommonPrefix(l.stdout.Printf, format, args...)
 }
 
 func (l *StdIOLogger) Errorf(format string, args ...interface{}) {
-	l.withCalleeLine(l.stderr.Printf, format, args...)
+	l.withCommonPrefix(l.stderr.Printf, format, args...)
 }
 
 func (l *StdIOLogger) Fatalf(format string, args ...interface{}) {
-	l.withCalleeLine(l.stderr.Fatalf, format, args...)
+	l.withCommonPrefix(l.stderr.Fatalf, format, args...)
 }

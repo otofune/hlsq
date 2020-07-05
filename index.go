@@ -20,6 +20,6 @@ func main() {
 	}
 	err = d.Download(
 		"http://localhost:8000/master.m3u8",
-		"./out")
+		"./out2")
 	panic(err)
 }

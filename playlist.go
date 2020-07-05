@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/grafov/m3u8"
@@ -22,7 +23,7 @@ const playlistURL = "http://localhost:10000/media/videos/twitch-shortcut/2020041
 // PlaylistDownloader
 type PlaylistDownloader struct {
 	ctx                  context.Context
-	df                   func(ctx context.Context, newReq func() (*http.Request, error), dstDirectory string) (err error)
+	df                   func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
 	downloadedSegmentURL map[string]bool
 }
 
@@ -37,31 +38,74 @@ func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error
 
 func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
 	logger := helper.ExtractLogger(dl.ctx)
-	mediaPlaylist, err := dl.ChoiceBestMediaPlaylist(masterPlaylistURL)
-	if err != nil {
-		return err
-	}
-	logger.Debugf("best playlist is %s", mediaPlaylist)
 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
 	}
 
-	mediaPlaylistURL, err := url.Parse(mediaPlaylist)
+	reader, err := dl.readHTTP(masterPlaylistURL)
+	defer reader.Close()
+
+	masterPlaylistBody, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return err
 	}
-	for reloadSec, segments := 0, []*m3u8.MediaSegment{}; reloadSec != -1; reloadSec, segments, err = dl.RetriveSegmentByMediaPlaylist(mediaPlaylist) {
-		// TODO: セグメント一覧の取得が遅れていないか確認
-		// TODO: プレイリストを吐き出す
+
+	mediaPlaylistURLString, err := dl.ChoiceBestMediaPlaylist(masterPlaylistBody, masterPlaylistURL)
+	if err != nil {
+		return err
+	}
+	logger.Debugf("best playlist is %s", mediaPlaylistURLString)
+
+	masterPlaylistFp, err := os.OpenFile(path.Join(directory, "master.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer masterPlaylistFp.Close()
+	if _, err := masterPlaylistFp.Write(masterPlaylistBody); err != nil {
+		return err
+	}
+
+	// persist
+	mediaPlaylistURL, err := url.Parse(mediaPlaylistURLString)
+	if err != nil {
+		return err
+	}
+
+	var downloadWaitGroup sync.WaitGroup
+	// バッファないと壊れるぞい
+	downloadSemaphore := make(chan bool, 20)
+	for times := 0; true; times++ {
+		reader, err := dl.readHTTP(mediaPlaylistURLString)
+		defer reader.Close()
+
+		mediaPlaylistBody, err := ioutil.ReadAll(reader)
 		if err != nil {
 			return err
 		}
+
+		reloadSec, segments, err := dl.RetriveSegmentByMediaPlaylist(mediaPlaylistBody)
+		if err != nil {
+			return err
+		}
+
+		// persist
+		mediaPlaylistFp, err := os.OpenFile(path.Join(directory, fmt.Sprintf("%d.m3u8", times)), os.O_WRONLY|os.O_CREATE, 0o644)
+		if err != nil {
+			return err
+		}
+		defer mediaPlaylistFp.Close()
+		mediaPlaylistFp.Write(mediaPlaylistBody)
+
 		for _, seg := range segments {
 			u, err := url.Parse(seg.URI)
 			tsURL := mediaPlaylistURL.ResolveReference(u).String()
-			fileName := fmt.Sprintf("%s.ts", seg.ProgramDateTime.Format("01-02_15:04:05Z07"))
-			logger.Debugf(fileName)
+			var fileName string
+			if seg.ProgramDateTime.IsZero() {
+				fileName = path.Base(u.Path)
+			} else {
+				fileName = fmt.Sprintf("%s.ts", seg.ProgramDateTime.Format("01-02_15:04:05Z07"))
+			}
 			if _, ok := dl.downloadedSegmentURL[tsURL]; ok {
 				logger.Debugf("already downloaded: %s", tsURL)
 				continue
@@ -72,8 +116,11 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 				return err
 			}
 			go func() {
+				downloadWaitGroup.Add(1)
+				defer downloadWaitGroup.Done()
 				err := dl.df(
 					dl.ctx,
+					downloadSemaphore,
 					func() (*http.Request, error) {
 						return http.NewRequest("GET", tsURL, nil)
 					},
@@ -85,28 +132,23 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			}()
 		}
 
-		if reloadSec != 0 {
-			logger.Debugf("waiting for %d sec to reload", reloadSec)
-			time.Sleep(time.Duration(reloadSec) * time.Second)
+		if reloadSec == -1 {
+			break
 		}
+
+		logger.Debugf("waiting for %d sec to reload", reloadSec)
+		time.Sleep(time.Duration(reloadSec) * time.Second)
 	}
+
+	downloadWaitGroup.Wait()
 
 	return nil
 }
 
-func (dl PlaylistDownloader) ChoiceBestMediaPlaylist(mayMasterPlaylistURL string) (string, error) {
+func (dl PlaylistDownloader) ChoiceBestMediaPlaylist(mayMasterPlaylistBody []byte, mayMasterPlaylistURL string) (string, error) {
 	logger := helper.ExtractLogger(dl.ctx)
 
-	reader, err := dl.readHTTP(mayMasterPlaylistURL)
-	defer reader.Close()
-
-	b, err := ioutil.ReadAll(reader)
-	if err != nil {
-		return "", err
-	}
-	logger.Printf("%s\n", b)
-
-	p, _, err := m3u8.Decode(*bytes.NewBuffer(b), true)
+	p, _, err := m3u8.Decode(*bytes.NewBuffer(mayMasterPlaylistBody), true)
 	if err != nil {
 		return "", err
 	}
@@ -137,29 +179,17 @@ func (dl PlaylistDownloader) ChoiceBestMediaPlaylist(mayMasterPlaylistURL string
 }
 
 // RetriveSegmentByMediaPlaylist returns -1 as reloadDurationInSeconds when playlist is final
-func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(mediaPlaylist string) (reloadDurationInSeconds int, mediaSegments []*m3u8.MediaSegment, err error) {
+func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []byte) (reloadDurationInSeconds int, mediaSegments []*m3u8.MediaSegment, err error) {
 	logger := helper.ExtractLogger(dl.ctx)
 
-	reader, err := dl.readHTTP(mediaPlaylist)
-	if err != nil {
-		return -1, nil, err
-	}
-	defer reader.Close()
-
-	b, err := ioutil.ReadAll(reader)
-	if err != nil {
-		return -1, nil, err
-	}
-	logger.Printf("%s\n", b)
-
-	p, _, err := m3u8.Decode(*bytes.NewBuffer(b), true)
+	p, _, err := m3u8.Decode(*bytes.NewBuffer(masterPlaylistBody), true)
 	if err != nil {
 		return -1, nil, err
 	}
 
 	playlist, ok := p.(*m3u8.MediaPlaylist)
 	if !ok {
-		return -1, nil, fmt.Errorf("not media playlist: %s", mediaPlaylist)
+		return -1, nil, fmt.Errorf("not media playlist: %s", masterPlaylistBody)
 	}
 
 	extinf := 0.0

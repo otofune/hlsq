@@ -13,8 +13,16 @@ import (
 
 // SaveRequestWithExponentialBackoffRetry5Times SSIA
 // TODO: explain when error will be happen
-func SaveRequestWithExponentialBackoffRetry5Times(ctx context.Context, newReq func() (*http.Request, error), dstFile string) error {
+func SaveRequestWithExponentialBackoffRetry5Times(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstFile string) error {
 	logger := helper.ExtractLogger(ctx)
+
+	sem <- true
+	defer func() { <-sem }()
+
+	req, err := newReq()
+	if err == nil {
+		logger.Debugf("Downloading %s\n", req.URL.String())
+	}
 
 	var outOfScopeError error
 
