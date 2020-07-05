@@ -48,7 +48,6 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	if err != nil {
 		return err
 	}
-	segmentRenban := 0
 	for reloadSec, segments := 0, []*m3u8.MediaSegment{}; reloadSec != -1; reloadSec, segments, err = dl.RetriveSegmentByMediaPlaylist(mediaPlaylist) {
 		// TODO: セグメント一覧の取得が遅れていないか確認
 		// TODO: プレイリストを吐き出す
@@ -58,7 +57,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 		for _, seg := range segments {
 			u, err := url.Parse(seg.URI)
 			tsURL := mediaPlaylistURL.ResolveReference(u).String()
-			fileName := fmt.Sprintf("%d.ts", segmentRenban)
+			fileName := fmt.Sprintf("%s.ts", seg.ProgramDateTime.Format("01-02_15:04:05Z07"))
 			logger.Debugf(fileName)
 			if _, ok := dl.downloadedSegmentURL[tsURL]; ok {
 				logger.Debugf("already downloaded: %s", tsURL)
@@ -66,7 +65,6 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			}
 
 			dl.downloadedSegmentURL[tsURL] = true
-			segmentRenban++
 			if err != nil {
 				return err
 			}
