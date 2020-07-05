@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,11 +40,28 @@ func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error
 func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
 	logger := helper.ExtractLogger(dl.ctx)
 
+	// FIXME: なぜか append 使ってないライブラリで終わってる
+	// .Segments の cap がこれ依存なので適当にデカくしときゃええやろ〜って決めてる
+	// あとから cap 拡張はできないので、これオーバーしたら壊れる
+	// 0.5 G くらい確保しとけばいいだろ という説 (2^32-1 が 4GB だよねって話されてそれ〜〜ってなった)
+	// TODO: Playlist さわれるまともなライブラリを作る
+	newPlaylist, err := m3u8.NewMediaPlaylist(0, uint(math.Pow(2, 29)))
+	if err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	playlistDirectory := path.Join(directory, "./playlists")
+	if err := os.MkdirAll(playlistDirectory, 0o755); err != nil {
 		return err
 	}
 
 	reader, err := dl.readHTTP(masterPlaylistURL)
+	if err != nil {
+		return err
+	}
 	defer reader.Close()
 
 	masterPlaylistBody, err := ioutil.ReadAll(reader)
@@ -57,14 +75,14 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	}
 	logger.Debugf("best playlist is %s", mediaPlaylistURLString)
 
-	masterPlaylistFp, err := os.OpenFile(path.Join(directory, "master.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
+	masterPlaylistFp, err := os.OpenFile(path.Join(playlistDirectory, "master.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
-	defer masterPlaylistFp.Close()
 	if _, err := masterPlaylistFp.Write(masterPlaylistBody); err != nil {
 		return err
 	}
+	masterPlaylistFp.Close()
 
 	// persist
 	mediaPlaylistURL, err := url.Parse(mediaPlaylistURLString)
@@ -72,8 +90,13 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 		return err
 	}
 
+	playFp, err := os.OpenFile(path.Join(directory, "play.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer playFp.Close()
+
 	var downloadWaitGroup sync.WaitGroup
-	// バッファないと壊れるぞい
 	downloadSemaphore := make(chan bool, 20)
 	for times := 0; true; times++ {
 		reader, err := dl.readHTTP(mediaPlaylistURLString)
@@ -90,12 +113,14 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 		}
 
 		// persist
-		mediaPlaylistFp, err := os.OpenFile(path.Join(directory, fmt.Sprintf("%d.m3u8", times)), os.O_WRONLY|os.O_CREATE, 0o644)
+		mediaPlaylistFp, err := os.OpenFile(path.Join(playlistDirectory, fmt.Sprintf("%d.m3u8", times)), os.O_WRONLY|os.O_CREATE, 0o644)
 		if err != nil {
 			return err
 		}
-		defer mediaPlaylistFp.Close()
-		mediaPlaylistFp.Write(mediaPlaylistBody)
+		if _, err := mediaPlaylistFp.Write(mediaPlaylistBody); err != nil {
+			return err
+		}
+		mediaPlaylistFp.Close()
 
 		for _, seg := range segments {
 			u, err := url.Parse(seg.URI)
@@ -109,6 +134,12 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			if _, ok := dl.downloadedSegmentURL[tsURL]; ok {
 				logger.Debugf("already downloaded: %s", tsURL)
 				continue
+			}
+
+			var copiedSeg m3u8.MediaSegment = *seg
+			copiedSeg.URI = fileName
+			if err := newPlaylist.AppendSegment(&copiedSeg); err != nil {
+				return err
 			}
 
 			dl.downloadedSegmentURL[tsURL] = true
@@ -132,6 +163,12 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			}()
 		}
 
+		logger.Debugf("updating live playlist")
+		playFp.Seek(0, 0)
+		if _, err := playFp.Write(newPlaylist.Encode().Bytes()); err != nil {
+			logger.Errorf("saving new playlist failed: %v", err)
+		}
+
 		if reloadSec == -1 {
 			break
 		}
@@ -141,6 +178,13 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	}
 
 	downloadWaitGroup.Wait()
+
+	logger.Debugf("saving vod playlist")
+	playFp.Seek(0, 0)
+	newPlaylist.Closed = true
+	if _, err := playFp.Write(newPlaylist.Encode().Bytes()); err != nil {
+		return err
+	}
 
 	return nil
 }
