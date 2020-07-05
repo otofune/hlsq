@@ -14,10 +14,14 @@ import (
 // SaveRequestWithExponentialBackoffRetry5Times SSIA
 // TODO: explain when error will be happen
 func SaveRequestWithExponentialBackoffRetry5Times(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstFile string) error {
-	logger := helper.ExtractLogger(ctx)
+	if len(sem) == 0 {
+		return fmt.Errorf("sem must be buffered")
+	}
 
 	sem <- true
 	defer func() { <-sem }()
+
+	logger := helper.ExtractLogger(ctx)
 
 	req, err := newReq()
 	if err == nil {
