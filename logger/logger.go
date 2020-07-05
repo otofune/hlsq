@@ -32,9 +32,9 @@ func (l *StdIOLogger) calleeLine() string {
 
 func (l *StdIOLogger) withCommonPrefix(log func(format string, v ...interface{}), format string, args ...interface{}) {
 	ts := time.Now().Format("2006-01-02 15:04:05")
-	margs := []interface{}{ts, l.calleeLine()}
+	margs := []interface{}{l.calleeLine(), ts}
 	margs = append(margs, args...)
-	log("%s %s: "+format, margs...)
+	log("[%s] %s "+format, margs...)
 }
 
 func (l *StdIOLogger) Debugf(format string, args ...interface{}) {
