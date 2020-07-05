@@ -21,5 +21,7 @@ func main() {
 	err = d.Download(
 		"http://localhost:8005/master.m3u8",
 		"./out5")
-	panic(err)
+	if err != nil {
+		panic(err)
+	}
 }
