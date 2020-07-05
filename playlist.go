@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,11 +37,11 @@ func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error
 
 func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
 	logger := helper.ExtractLogger(dl.ctx)
-	mediaPlaylist, err := dl.ListMediaPlaylist(masterPlaylistURL)
-	logger.Debugf("best playlist is %s", mediaPlaylist)
+	mediaPlaylist, err := dl.ChoiceBestMediaPlaylist(masterPlaylistURL)
 	if err != nil {
 		return err
 	}
+	logger.Debugf("best playlist is %s", mediaPlaylist)
 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
@@ -91,25 +94,19 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	return nil
 }
 
-func (dl PlaylistDownloader) ListMediaPlaylist(mayMasterPlaylistURL string) (string, error) {
+func (dl PlaylistDownloader) ChoiceBestMediaPlaylist(mayMasterPlaylistURL string) (string, error) {
 	logger := helper.ExtractLogger(dl.ctx)
-	headers, err := helper.ExtractHeader(dl.ctx)
-	if err != nil {
-		return "", fmt.Errorf("Missing header in context: %w", err)
-	}
 
-	req, err := http.NewRequest("GET", mayMasterPlaylistURL, nil)
+	reader, err := dl.readHTTP(mayMasterPlaylistURL)
+	defer reader.Close()
+
+	b, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return "", err
 	}
-	req.Header = headers
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
+	logger.Printf("%s\n", b)
 
-	p, _, err := m3u8.DecodeFrom(res.Body, true)
+	p, _, err := m3u8.Decode(*bytes.NewBuffer(b), true)
 	if err != nil {
 		return "", err
 	}
@@ -143,13 +140,19 @@ func (dl PlaylistDownloader) ListMediaPlaylist(mayMasterPlaylistURL string) (str
 func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(mediaPlaylist string) (reloadDurationInSeconds int, mediaSegments []*m3u8.MediaSegment, err error) {
 	logger := helper.ExtractLogger(dl.ctx)
 
-	resp, err := http.Get(mediaPlaylist)
+	reader, err := dl.readHTTP(mediaPlaylist)
 	if err != nil {
 		return -1, nil, err
 	}
-	defer resp.Body.Close()
+	defer reader.Close()
 
-	p, _, err := m3u8.DecodeFrom(resp.Body, true)
+	b, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return -1, nil, err
+	}
+	logger.Printf("%s\n", b)
+
+	p, _, err := m3u8.Decode(*bytes.NewBuffer(b), true)
 	if err != nil {
 		return -1, nil, err
 	}
@@ -177,4 +180,21 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(mediaPlaylist string)
 		return -1, mediaSegments, nil
 	}
 	return int(extinf) / 2, mediaSegments, nil
+}
+
+func (dl PlaylistDownloader) readHTTP(url string) (io.ReadCloser, error) {
+	headers, err := helper.ExtractHeader(dl.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("headers doesn't set in context: %w", err)
+	}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = headers
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return res.Body, nil
 }
