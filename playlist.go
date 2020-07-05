@@ -158,7 +158,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 					path.Join(directory, fileName),
 				)
 				if err != nil {
-					logger.Errorf("can not download tsURL: %s", err)
+					logger.Errorf("can not download %s: %s", tsURL, err)
 				}
 			}()
 		}
@@ -181,7 +181,9 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 
 	logger.Debugf("saving vod playlist")
 	playFp.Seek(0, 0)
+	// FIXME: なんか #EXT-X-ENDLIST が追加されてなくて最悪
 	newPlaylist.Closed = true
+	playFp.Seek(0, 0)
 	if _, err := playFp.Write(newPlaylist.Encode().Bytes()); err != nil {
 		return err
 	}
