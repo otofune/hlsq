@@ -44,6 +44,7 @@ func WithLogger(ctx context.Context, l EmbedLogger) context.Context {
 
 // ExtractLogger
 func ExtractLogger(ctx context.Context) EmbedLogger {
+	// TODO: 代替の logger を指し込む
 	if v := ctx.Value(loggerKey); v != nil {
 		if l, ok := v.(EmbedLogger); ok {
 			return l
