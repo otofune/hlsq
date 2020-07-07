@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"os"
 
 	"github.com/otofune/hlsq/helper"
 	"github.com/otofune/hlsq/logger"
@@ -18,9 +19,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	err = d.Download(
-		"http://localhost:8005/master.m3u8",
-		"./out5")
+
+	if len(os.Args) != 3 {
+		panic("You must specify 2 arguments: url, directory")
+	}
+
+	err = d.Download(os.Args[1], os.Args[2])
 	if err != nil {
 		panic(err)
 	}
