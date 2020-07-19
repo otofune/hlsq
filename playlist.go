@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,18 +36,33 @@ func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error
 	}, nil
 }
 
-func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
-	logger := helper.ExtractLogger(dl.ctx)
-
-	// FIXME: なぜか append 使ってないライブラリで終わってる
-	// .Segments の cap がこれ依存なので適当にデカくしときゃええやろ〜って決めてる
-	// あとから cap 拡張はできないので、これオーバーしたら壊れる
-	// 0.5 G くらい確保しとけばいいだろ という説 (2^32-1 が 4GB だよねって話されてそれ〜〜ってなった)
-	// TODO: Playlist さわれるまともなライブラリを作る
-	newPlaylist, err := m3u8.NewMediaPlaylist(0, uint(math.Pow(2, 29)))
+func (dl PlaylistDownloader) persistPlaylist(file *os.File, segments []*m3u8.MediaSegment, closed bool) error {
+	playlist, err := m3u8.NewMediaPlaylist(0, uint(len(segments)))
 	if err != nil {
 		return err
 	}
+
+	// FIXME: true にしても #EXT-X-ENDLIST が追記されていない気がする
+	playlist.Closed = closed
+
+	for _, s := range segments {
+		if err := playlist.AppendSegment(s); err != nil {
+			return err
+		}
+	}
+
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err := file.Write(playlist.Encode().Bytes()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
+	logger := helper.ExtractLogger(dl.ctx)
 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
@@ -58,22 +72,18 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 		return err
 	}
 
+	// retrive master playlist
 	reader, err := dl.readHTTP(masterPlaylistURL)
 	if err != nil {
 		return err
 	}
 	defer reader.Close()
 
+	// FIXME: 保持時間が長い
 	masterPlaylistBody, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return err
 	}
-
-	mediaPlaylistURLString, err := dl.ChoiceBestMediaPlaylist(masterPlaylistBody, masterPlaylistURL)
-	if err != nil {
-		return err
-	}
-	logger.Debugf("best playlist is %s", mediaPlaylistURLString)
 
 	masterPlaylistFp, err := os.OpenFile(path.Join(playlistDirectory, "master.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
@@ -84,7 +94,13 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	}
 	masterPlaylistFp.Close()
 
-	// persist
+	// find media playlist
+	mediaPlaylistURLString, err := dl.ChoiceBestMediaPlaylist(masterPlaylistBody, masterPlaylistURL)
+	if err != nil {
+		return err
+	}
+	logger.Debugf("best playlist is %s", mediaPlaylistURLString)
+
 	mediaPlaylistURL, err := url.Parse(mediaPlaylistURLString)
 	if err != nil {
 		return err
@@ -97,7 +113,10 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	defer playFp.Close()
 
 	var downloadWaitGroup sync.WaitGroup
+	// TODO: 並列数をコントロールできるようにする
 	downloadSemaphore := make(chan bool, 20)
+	// ライブラリの AppendSegment が append を使っておらず使いものにならないため自前で管理する
+	allSegments := []*m3u8.MediaSegment{}
 	for times := 0; true; times++ {
 		reader, err := dl.readHTTP(mediaPlaylistURLString)
 		defer reader.Close()
@@ -138,9 +157,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 
 			var copiedSeg m3u8.MediaSegment = *seg
 			copiedSeg.URI = fileName
-			if err := newPlaylist.AppendSegment(&copiedSeg); err != nil {
-				return err
-			}
+			allSegments = append(allSegments, &copiedSeg)
 
 			dl.downloadedSegmentURL[tsURL] = true
 			if err != nil {
@@ -164,8 +181,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 		}
 
 		logger.Debugf("updating live playlist")
-		playFp.Seek(0, 0)
-		if _, err := playFp.Write(newPlaylist.Encode().Bytes()); err != nil {
+		if err := dl.persistPlaylist(playFp, allSegments, false); err != nil {
 			logger.Errorf("saving new playlist failed: %v", err)
 		}
 
@@ -180,11 +196,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	downloadWaitGroup.Wait()
 
 	logger.Debugf("saving vod playlist")
-	playFp.Seek(0, 0)
-	// FIXME: なんか #EXT-X-ENDLIST が追加されてなくて最悪
-	newPlaylist.Closed = true
-	playFp.Seek(0, 0)
-	if _, err := playFp.Write(newPlaylist.Encode().Bytes()); err != nil {
+	if err := dl.persistPlaylist(playFp, allSegments, true); err != nil {
 		return err
 	}
 
