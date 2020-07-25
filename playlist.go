@@ -20,14 +20,12 @@ import (
 
 const playlistURL = "http://localhost:10000/media/videos/twitch-shortcut/20200418-mu2020-2/1080p60/index-dvr.m3u8"
 
-// PlaylistDownloader
 type PlaylistDownloader struct {
 	ctx                  context.Context
 	df                   func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
 	downloadedSegmentURL map[string]bool
 }
 
-// NewMediaPlaylistDownloader generator
 func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error) {
 	return &PlaylistDownloader{
 		ctx:                  ctx,
@@ -238,8 +236,6 @@ func (dl PlaylistDownloader) ChoiceBestMediaPlaylist(mayMasterPlaylistBody []byt
 
 // RetriveSegmentByMediaPlaylist returns -1 as reloadDurationInSeconds when playlist is final
 func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []byte) (reloadDurationInSeconds int, mediaSegments []*m3u8.MediaSegment, err error) {
-	logger := helper.ExtractLogger(dl.ctx)
-
 	p, _, err := m3u8.Decode(*bytes.NewBuffer(masterPlaylistBody), true)
 	if err != nil {
 		return -1, nil, err
@@ -250,16 +246,10 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []
 		return -1, nil, fmt.Errorf("not media playlist: %s", masterPlaylistBody)
 	}
 
-	extinf := 0.0
 	for _, s := range playlist.Segments {
-		// なぜか nil が入ることがあるので除外する (え？)
-		// 1024 件で初期化してるコードがあってそれのせいっぽい
+		// なぜか nil が入ることがあるので除外する
+		// ライブラリ側に 1024 件で初期化してるコードがあってそれのせいっぽい
 		if s != nil {
-			if s.ProgramDateTime.After(time.Now()) {
-				logger.Debugf("%s is created in future", s.URI)
-				continue
-			}
-			extinf += s.Duration
 			mediaSegments = append(mediaSegments, s)
 		}
 	}
@@ -267,7 +257,7 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []
 	if playlist.Closed {
 		return -1, mediaSegments, nil
 	}
-	return int(extinf) / 2, mediaSegments, nil
+	return int(playlist.TargetDuration), mediaSegments, nil
 }
 
 func (dl PlaylistDownloader) readHTTP(url string) (io.ReadCloser, error) {
