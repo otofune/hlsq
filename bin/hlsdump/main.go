@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/otofune/hlsq"
 	"github.com/otofune/hlsq/helper"
 	"github.com/otofune/hlsq/logger"
 )
@@ -15,7 +16,7 @@ func main() {
 	ctx = helper.WithLogger(ctx, logger)
 	ctx = helper.WithHeader(ctx, http.Header{})
 
-	d, err := NewMediaPlaylistDownloader(ctx)
+	d, err := hlsq.NewMediaPlaylistDownloader(ctx)
 	if err != nil {
 		panic(err)
 	}

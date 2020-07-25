@@ -10,12 +10,10 @@ type key string
 
 const headerKey = key("hlsqHeaderKey")
 
-// WithHeader へっだつけるやつ
 func WithHeader(ctx context.Context, h http.Header) context.Context {
 	return context.WithValue(ctx, headerKey, h)
 }
 
-// ExtractHeader こんてきすとからとりだすやつ
 func ExtractHeader(ctx context.Context) (http.Header, error) {
 	if v := ctx.Value(headerKey); v != nil {
 		if h, ok := v.(http.Header); ok {
@@ -37,14 +35,12 @@ type EmbedLogger interface {
 	Fatalf(format string, args ...interface{})
 }
 
-// WithLogger
 func WithLogger(ctx context.Context, l EmbedLogger) context.Context {
 	return context.WithValue(ctx, loggerKey, l)
 }
 
-// ExtractLogger
 func ExtractLogger(ctx context.Context) EmbedLogger {
-	// TODO: 代替の logger を指し込む
+	// TODO: 代替のなにもしない logger を指し込む
 	if v := ctx.Value(loggerKey); v != nil {
 		if l, ok := v.(EmbedLogger); ok {
 			return l
