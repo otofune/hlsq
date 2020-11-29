@@ -60,6 +60,11 @@ func (dl PlaylistDownloader) persistPlaylist(file *os.File, segments []*m3u8.Med
 }
 
 func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string) error {
+	mpu, err := url.Parse(masterPlaylistURL)
+	if err != nil {
+		return err
+	}
+
 	logger := helper.ExtractLogger(dl.ctx)
 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -103,6 +108,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	if err != nil {
 		return err
 	}
+	mediaPlaylistURL = mpu.ResolveReference(mediaPlaylistURL)
 
 	playFp, err := os.OpenFile(path.Join(directory, "play.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
@@ -116,7 +122,10 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	// ライブラリの AppendSegment が append を使っておらず使いものにならないため自前で管理する
 	allSegments := []*m3u8.MediaSegment{}
 	for times := 0; true; times++ {
-		reader, err := dl.readHTTP(mediaPlaylistURLString)
+		reader, err := dl.readHTTP(mediaPlaylistURL.String())
+		if err != nil {
+			return err
+		}
 		defer reader.Close()
 
 		mediaPlaylistBody, err := ioutil.ReadAll(reader)
