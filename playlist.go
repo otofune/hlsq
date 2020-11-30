@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,7 +134,10 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			return err
 		}
 
-		reloadSec, segments, err := dl.RetriveSegmentByMediaPlaylist(mediaPlaylistBody)
+		// m3u8 パーサがバグっている (EXT-X-KEY があると nil pointer exception する) のでパースされないようにする
+		mediaPlaylistBodyModifiedFIXME := strings.ReplaceAll(string(mediaPlaylistBody), "EXT-X-KEY", "EXT-X-REPLACED-X-EXT-KEY")
+
+		reloadSec, segments, err := dl.RetriveSegmentByMediaPlaylist([]byte(mediaPlaylistBodyModifiedFIXME))
 		if err != nil {
 			return err
 		}
