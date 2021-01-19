@@ -15,22 +15,23 @@ import (
 	"time"
 
 	"github.com/grafov/m3u8"
-	"github.com/otofune/hlsq/downloader"
 	"github.com/otofune/hlsq/helper"
 )
 
-const playlistURL = "http://localhost:10000/media/videos/twitch-shortcut/20200418-mu2020-2/1080p60/index-dvr.m3u8"
+type PlaylistDownloaderDF func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
 
 type PlaylistDownloader struct {
 	ctx                  context.Context
-	df                   func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
+	client               *http.Client
+	df                   PlaylistDownloaderDF
 	downloadedSegmentURL map[string]bool
 }
 
-func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error) {
+func NewMediaPlaylistDownloader(ctx context.Context, client *http.Client, df PlaylistDownloaderDF) (*PlaylistDownloader, error) {
 	return &PlaylistDownloader{
 		ctx:                  ctx,
-		df:                   downloader.SaveRequestWithExponentialBackoffRetry5Times,
+		df:                   df,
+		client:               client,
 		downloadedSegmentURL: map[string]bool{},
 	}, nil
 }
@@ -134,7 +135,7 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 			return err
 		}
 
-		// m3u8 パーサがバグっている (EXT-X-KEY があると nil pointer exception する) のでパースされないようにする
+		// FIXME: m3u8 パーサがバグっている (EXT-X-KEY があると nil pointer exception する) のでパースされないようにする
 		mediaPlaylistBodyModifiedFIXME := strings.ReplaceAll(string(mediaPlaylistBody), "EXT-X-KEY", "EXT-X-REPLACED-X-EXT-KEY")
 
 		reloadSec, segments, err := dl.RetriveSegmentByMediaPlaylist([]byte(mediaPlaylistBodyModifiedFIXME))
@@ -274,16 +275,11 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []
 }
 
 func (dl PlaylistDownloader) readHTTP(url string) (io.ReadCloser, error) {
-	headers, err := helper.ExtractHeader(dl.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("headers doesn't set in context: %w", err)
-	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header = headers
-	res, err := http.DefaultClient.Do(req)
+	res, err := dl.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
