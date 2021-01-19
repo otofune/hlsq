@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -78,14 +77,14 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	}
 
 	// retrive master playlist
-	reader, err := dl.readHTTP(masterPlaylistURL)
+	resp, err := dl.client.Get(masterPlaylistURL)
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer resp.Body.Close()
 
 	// FIXME: 保持時間が長い
-	masterPlaylistBody, err := ioutil.ReadAll(reader)
+	masterPlaylistBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -124,13 +123,13 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	// ライブラリの AppendSegment が append を使っておらず使いものにならないため自前で管理する
 	allSegments := []*m3u8.MediaSegment{}
 	for times := 0; true; times++ {
-		reader, err := dl.readHTTP(mediaPlaylistURL.String())
+		resp, err := dl.client.Get(mediaPlaylistURL.String())
 		if err != nil {
 			return err
 		}
-		defer reader.Close()
+		defer resp.Body.Close()
 
-		mediaPlaylistBody, err := ioutil.ReadAll(reader)
+		mediaPlaylistBody, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
@@ -272,16 +271,4 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []
 		return -1, mediaSegments, nil
 	}
 	return int(playlist.TargetDuration), mediaSegments, nil
-}
-
-func (dl PlaylistDownloader) readHTTP(url string) (io.ReadCloser, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	res, err := dl.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return res.Body, nil
 }
