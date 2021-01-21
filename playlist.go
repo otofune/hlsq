@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -15,22 +14,23 @@ import (
 	"time"
 
 	"github.com/grafov/m3u8"
-	"github.com/otofune/hlsq/downloader"
-	"github.com/otofune/hlsq/helper"
+	helper "github.com/otofune/hlsq/ctxlogger"
 )
 
-const playlistURL = "http://localhost:10000/media/videos/twitch-shortcut/20200418-mu2020-2/1080p60/index-dvr.m3u8"
+type PlaylistDownloaderDF func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
 
 type PlaylistDownloader struct {
 	ctx                  context.Context
-	df                   func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)
+	client               *http.Client
+	df                   PlaylistDownloaderDF
 	downloadedSegmentURL map[string]bool
 }
 
-func NewMediaPlaylistDownloader(ctx context.Context) (*PlaylistDownloader, error) {
+func NewMediaPlaylistDownloader(ctx context.Context, client *http.Client, df PlaylistDownloaderDF) (*PlaylistDownloader, error) {
 	return &PlaylistDownloader{
 		ctx:                  ctx,
-		df:                   downloader.SaveRequestWithExponentialBackoffRetry5Times,
+		df:                   df,
+		client:               client,
 		downloadedSegmentURL: map[string]bool{},
 	}, nil
 }
@@ -77,14 +77,14 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	}
 
 	// retrive master playlist
-	reader, err := dl.readHTTP(masterPlaylistURL)
+	resp, err := dl.client.Get(masterPlaylistURL)
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer resp.Body.Close()
 
 	// FIXME: 保持時間が長い
-	masterPlaylistBody, err := ioutil.ReadAll(reader)
+	masterPlaylistBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -123,18 +123,18 @@ func (dl PlaylistDownloader) Download(masterPlaylistURL string, directory string
 	// ライブラリの AppendSegment が append を使っておらず使いものにならないため自前で管理する
 	allSegments := []*m3u8.MediaSegment{}
 	for times := 0; true; times++ {
-		reader, err := dl.readHTTP(mediaPlaylistURL.String())
+		resp, err := dl.client.Get(mediaPlaylistURL.String())
 		if err != nil {
 			return err
 		}
-		defer reader.Close()
+		defer resp.Body.Close()
 
-		mediaPlaylistBody, err := ioutil.ReadAll(reader)
+		mediaPlaylistBody, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
 
-		// m3u8 パーサがバグっている (EXT-X-KEY があると nil pointer exception する) のでパースされないようにする
+		// FIXME: m3u8 パーサがバグっている (EXT-X-KEY があると nil pointer exception する) のでパースされないようにする
 		mediaPlaylistBodyModifiedFIXME := strings.ReplaceAll(string(mediaPlaylistBody), "EXT-X-KEY", "EXT-X-REPLACED-X-EXT-KEY")
 
 		reloadSec, segments, err := dl.RetriveSegmentByMediaPlaylist([]byte(mediaPlaylistBodyModifiedFIXME))
@@ -271,21 +271,4 @@ func (dl PlaylistDownloader) RetriveSegmentByMediaPlaylist(masterPlaylistBody []
 		return -1, mediaSegments, nil
 	}
 	return int(playlist.TargetDuration), mediaSegments, nil
-}
-
-func (dl PlaylistDownloader) readHTTP(url string) (io.ReadCloser, error) {
-	headers, err := helper.ExtractHeader(dl.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("headers doesn't set in context: %w", err)
-	}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header = headers
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return res.Body, nil
 }

@@ -6,17 +6,16 @@ import (
 	"os"
 
 	"github.com/otofune/hlsq"
-	"github.com/otofune/hlsq/helper"
-	"github.com/otofune/hlsq/logger"
+	"github.com/otofune/hlsq/bin/hlsdump/downloader"
+	helper "github.com/otofune/hlsq/ctxlogger"
 )
 
 func main() {
 	ctx := context.TODO()
-	logger := logger.NewStdIOLogger()
+	logger := helper.NewStdIOLogger()
 	ctx = helper.WithLogger(ctx, logger)
-	ctx = helper.WithHeader(ctx, http.Header{})
 
-	d, err := hlsq.NewMediaPlaylistDownloader(ctx)
+	d, err := hlsq.NewMediaPlaylistDownloader(ctx, http.DefaultClient, downloader.SaveRequestWithExponentialBackoffRetry5Times)
 	if err != nil {
 		panic(err)
 	}
