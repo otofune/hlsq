@@ -14,19 +14,20 @@ import (
 	"time"
 
 	"github.com/otofune/hlsq"
+	"github.com/otofune/hlsq/ctxlogger"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
-func New(client *http.Client, dest string) hlsq.PlayHandler {
-	return &handler{
+func New(client *http.Client, dest string) *HLSDumpHandler {
+	return &HLSDumpHandler{
 		client:     client,
 		destDir:    dest,
 		downloadSW: semaphore.NewWeighted(8),
 	}
 }
 
-type handler struct {
+type HLSDumpHandler struct {
 	client         *http.Client
 	destDir        string
 	segmentDirName string
@@ -38,13 +39,13 @@ type handler struct {
 	downloaded sync.Map
 }
 
-func (h *handler) append(seg *hlsq.MediaSegment) {
+func (h *HLSDumpHandler) append(seg *hlsq.MediaSegment) {
 	h.segmentMutex.Lock()
 	h.segs = append(h.segs, seg)
 	h.segmentMutex.Unlock()
 }
 
-func (h *handler) deferPersistPlaylistWithoutUpdateInDuration(dur time.Duration) error {
+func (h *HLSDumpHandler) deferPersistPlaylistWithoutUpdateInDuration(dur time.Duration) error {
 	l := len(h.segs)
 	// debounce
 	time.Sleep(dur)
@@ -55,7 +56,7 @@ func (h *handler) deferPersistPlaylistWithoutUpdateInDuration(dur time.Duration)
 	return nil
 }
 
-func (h *handler) persistPlaylist(closed bool) error {
+func (h *HLSDumpHandler) persistPlaylist(closed bool) error {
 	sorted := h.segs.Sort()
 	f, err := os.OpenFile(filepath.Join(h.destDir, "play.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
@@ -67,16 +68,24 @@ func (h *handler) persistPlaylist(closed bool) error {
 	return nil
 }
 
-func (h *handler) saveURLTo(ctx context.Context, u *url.URL, path string) error {
+func (h *HLSDumpHandler) saveURLTo(ctx context.Context, u *url.URL, path string) error {
 	if _, loaded := h.downloaded.LoadOrStore(u.String(), struct{}{}); loaded {
 		return nil // skip already got
 	}
+
+	if err := h.downloadSW.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer h.downloadSW.Release(1)
 
 	f, err := os.OpenFile(filepath.Join(h.destDir, path), os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
 	}
 
+	logger := ctxlogger.ExtractLogger(ctx)
+
+	logger.Debugf("Downloading %s\n", u)
 	resp, err := hlsq.DoGetWithBackoffRetry(ctx, h.client, u)
 	if err != nil {
 		return err
@@ -89,7 +98,7 @@ func (h *handler) saveURLTo(ctx context.Context, u *url.URL, path string) error 
 	return nil
 }
 
-func (h *handler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
+func (h *HLSDumpHandler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
 	segmentURI, err := url.Parse(seg.URI)
 	if err != nil {
 		return err
@@ -129,4 +138,9 @@ func (h *handler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
 	}
 
 	return eg.Wait()
+}
+
+// Close vod playlist として playlist を保存する
+func (h *HLSDumpHandler) Close() error {
+	return h.persistPlaylist(true)
 }

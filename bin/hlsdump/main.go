@@ -48,7 +48,10 @@ func main() {
 		panic(err)
 	}
 
-	ses, err := hlsq.Play(ctx, http.DefaultClient, playlistURL, chooseBestOne, handler.New(http.DefaultClient, dest))
+	h := handler.New(http.DefaultClient, dest)
+	defer h.Close()
+
+	ses, err := hlsq.Play(ctx, http.DefaultClient, playlistURL, chooseBestOne, h)
 	if err != nil {
 		panic(err)
 	}
