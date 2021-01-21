@@ -1,0 +1,6 @@
+*
+!handler
+!*.go
+!.gitignore
+!go.*
+!*.md

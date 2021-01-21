@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -23,12 +24,20 @@ func NewStdIOLogger() Logger {
 }
 
 func (l *stdIOLogger) calleeLine() string {
+	_, thisfile, _, ok := runtime.Caller(0)
+	// root = ../
+	projectRoot := filepath.Dir(filepath.Dir(thisfile))
+
 	_, file, line, ok := runtime.Caller(3)
 	if !ok {
 		return "???:???"
 	}
-	filePart := strings.Split(file, "/")
-	return fmt.Sprintf("%s:%d", filePart[len(filePart)-1], line)
+	filePart, err := filepath.Rel(projectRoot, file)
+	if strings.Contains(filePart, "..") || err != nil {
+		fileParts := strings.Split(file, "/")
+		filePart = fileParts[len(fileParts)-1]
+	}
+	return fmt.Sprintf("%s:%d", filePart, line)
 }
 
 func (l *stdIOLogger) withCommonPrefix(log func(format string, v ...interface{}), format string, args ...interface{}) {

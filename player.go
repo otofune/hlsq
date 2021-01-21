@@ -1,10 +1,14 @@
 package hlsq
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,16 +17,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// MediaSegment ms
-type MediaSegment struct {
-	m3u8.MediaSegment
-	Sequence              uint64
-	DiscontinuitySequence uint64
-	Playlist              *url.URL
-}
-
 // PlayHandler ph
 type PlayHandler interface {
+	// Receive called in goroutine. order isn't guaranteed, you must sort segments by sequence + discontinuity sequence to persist.
 	Receive(ctx context.Context, m *MediaSegment) error
 }
 
@@ -53,7 +50,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 		return nil, err
 	}
 	defer resp.Body.Close()
-	playlist, _, err := m3u8.DecodeFrom(resp.Body, true)
+
+	playlist, err := decodeM3U8(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +61,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	eg, ctx := errgroup.WithContext(ctx)
+	cctx, cancel := context.WithCancel(ctx)
+	eg, cctx := errgroup.WithContext(cctx)
 	p := playSession{
 		cancel: cancel,
 		eg:     eg,
@@ -73,7 +71,7 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 	for _, mp := range mediaPlaylists {
 		mpu := *mp
 		eg.Go(func() error {
-			return runPilot(ctx, hc, &mpu, ph)
+			return runPilot(cctx, hc, &mpu, ph)
 		})
 	}
 
@@ -82,7 +80,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 
 func runPilot(ctx context.Context, hc *http.Client, mediaPlaylist *url.URL, ph PlayHandler) error {
 	// handler を goroutine で呼び出すのでそのために使う
-	eg, ctx := errgroup.WithContext(ctx)
+	// cctx はあくまで errgroup 配下に渡す、そうしないと子のエラーで意図せず親の処理が止まることになる
+	eg, cctx := errgroup.WithContext(ctx)
 
 	logger := ctxlogger.ExtractLogger(ctx)
 
@@ -94,20 +93,22 @@ INFINITE_LOOP:
 	for {
 		select {
 		case <-ctx.Done():
+			return ctx.Err()
+		case <-cctx.Done():
 			// 問題が起きた場合
 			return eg.Wait()
 		default:
-			logger.Debugf("waiting media playlist about %s\n", waitNextSegment.String())
 			time.Sleep(waitNextSegment)
+			logger.Debugf("fetching media playlist (%s waited)\n", waitNextSegment.String())
 
-			resp, err := doGetWithBackoffRetry(ctx, hc, mediaPlaylist)
+			resp, err := DoGetWithBackoffRetry(ctx, hc, mediaPlaylist)
 			if err != nil {
 				return err
 			}
 			if resp.StatusCode > 399 {
 				return fmt.Errorf("can not get media playlist, server respond with %d", resp.StatusCode)
 			}
-			pl, _, err := m3u8.DecodeFrom(resp.Body, true)
+			pl, err := decodeM3U8(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				return err
@@ -139,7 +140,8 @@ INFINITE_LOOP:
 					cseg := *seg
 
 					eg.Go(func() error {
-						return ph.Receive(ctx, &MediaSegment{
+						logger.Debugf("goroutine run for id: …%s", id[len(id)-50:])
+						return ph.Receive(cctx, &MediaSegment{
 							MediaSegment:          cseg,
 							Sequence:              cseq,
 							DiscontinuitySequence: cdseq,
@@ -159,4 +161,24 @@ INFINITE_LOOP:
 	}
 
 	return eg.Wait()
+}
+
+func decodeM3U8(reader io.Reader) (m3u8.Playlist, error) {
+	playlistBody, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	// panic 対策
+	// m3u8.Decode は blank line があったときに media segment だと誤認する
+	// RFC8216 "Blank lines are ignored." だが、そうなっていない
+	// このとき media segment を構造体にする条件として #EXTINF が表われている必要があるコードになっている
+	// 空行の場合その条件は満たされないことがある。#EXTINF は直後の MediaSegment にのみ反映されているコードになっているためである
+	// さらに EXT-X-KEY などの全体に適用する設定がある場合、メタデータを適用する挙動がある
+	// 当然前提として MediaSegment が初期化されている前提があり、上記のようにすり抜けると panic する
+	// というわけなので、いったん空行を消して回避する
+	playlistString := strings.Join(strings.Split(string(playlistBody), "\n\n"), "\n")
+
+	pl, _, err := m3u8.Decode(*bytes.NewBufferString(playlistString), false)
+	return pl, err
 }
