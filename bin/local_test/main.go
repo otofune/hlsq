@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,19 +10,22 @@ import (
 	"time"
 
 	"github.com/otofune/hlsq"
+	"github.com/otofune/hlsq/ctxlogger"
 )
 
 type handler struct {
 }
 
 func (handler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
-	fmt.Printf("%d/%d\n", seg.DiscontinuitySequence, seg.Sequence)
+	hash := sha1.Sum([]byte(seg.Playlist.String()))
+	fmt.Printf("%x:%d/%d\n", hash, seg.DiscontinuitySequence, seg.Sequence)
 	return nil
 }
 
 func main() {
-	ctx := context.TODO()
-	u, _ := url.Parse(os.Args[0])
+	ctx := ctxlogger.WithLogger(context.Background(), ctxlogger.NewStdIOLogger())
+
+	u, _ := url.Parse(os.Args[1])
 	ses, err := hlsq.Play(ctx, http.DefaultClient, u, func(va []*hlsq.MediaPlaylist) []*hlsq.MediaPlaylist {
 		return va
 	}, handler{})

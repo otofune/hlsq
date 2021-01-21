@@ -1,4 +1,4 @@
-package logger
+package ctxlogger
 
 type dummyLogger struct{}
 

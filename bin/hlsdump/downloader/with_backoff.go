@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/otofune/hlsq/helper"
+	helper "github.com/otofune/hlsq/ctxlogger"
 )
 
 // SaveRequestWithExponentialBackoffRetry5Times SSIA

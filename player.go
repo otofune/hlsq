@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/grafov/m3u8"
+	"github.com/otofune/hlsq/ctxlogger"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -70,7 +71,6 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 	}
 
 	for _, mp := range mediaPlaylists {
-		fmt.Println(mp)
 		mpu := *mp
 		eg.Go(func() error {
 			return runPilot(ctx, hc, &mpu, ph)
@@ -84,6 +84,8 @@ func runPilot(ctx context.Context, hc *http.Client, mediaPlaylist *url.URL, ph P
 	// handler を goroutine で呼び出すのでそのために使う
 	eg, ctx := errgroup.WithContext(ctx)
 
+	logger := ctxlogger.ExtractLogger(ctx)
+
 	seenSegmentSet := sync.Map{}
 
 	waitNextSegment := time.Duration(0)
@@ -95,7 +97,7 @@ INFINITE_LOOP:
 			// 問題が起きた場合
 			return eg.Wait()
 		default:
-			fmt.Printf("Waiting %s\n", waitNextSegment.String())
+			logger.Debugf("waiting media playlist about %s\n", waitNextSegment.String())
 			time.Sleep(waitNextSegment)
 
 			resp, err := doGetWithBackoffRetry(ctx, hc, mediaPlaylist)
@@ -128,7 +130,7 @@ INFINITE_LOOP:
 
 					id := fmt.Sprintf("%s:%d/%d", mediaPlaylist.String(), dseq, seq)
 					if _, seen := seenSegmentSet.LoadOrStore(id, struct{}{}); seen {
-						continue
+						continue // ignore
 					}
 
 					// goroutine が実行されるタイミングは不明なので、コピーして値を保持する

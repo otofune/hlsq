@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/grafov/m3u8"
-	"github.com/otofune/hlsq/helper"
+	helper "github.com/otofune/hlsq/ctxlogger"
 )
 
 type PlaylistDownloaderDF func(ctx context.Context, sem chan bool, newReq func() (*http.Request, error), dstDirectory string) (err error)

@@ -1,4 +1,4 @@
-package logger
+package ctxlogger
 
 // Logger hlsq logger interface
 type Logger interface {

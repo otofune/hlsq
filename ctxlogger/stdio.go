@@ -1,4 +1,4 @@
-package logger
+package ctxlogger
 
 import (
 	"fmt"
@@ -33,9 +33,9 @@ func (l *stdIOLogger) calleeLine() string {
 
 func (l *stdIOLogger) withCommonPrefix(log func(format string, v ...interface{}), format string, args ...interface{}) {
 	ts := time.Now().Format("2006-01-02 15:04:05")
-	margs := []interface{}{l.calleeLine(), ts}
+	margs := []interface{}{ts, l.calleeLine()}
 	margs = append(margs, args...)
-	log("%s [%s] "+format, margs...)
+	log("%s %s: "+format, margs...)
 }
 
 func (l *stdIOLogger) Debugf(format string, args ...interface{}) {
