@@ -1,4 +1,4 @@
-module github.com/otofune/niconic/vendor-priv/github.com/otofune/hlsq/bin/local_test
+module github.com/otofune/niconic/vendor-priv/github.com/otofune/hlsq/bin/echo
 
 replace github.com/otofune/hlsq => ../../
 

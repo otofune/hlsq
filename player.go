@@ -23,6 +23,7 @@ type MediaSegment struct {
 
 // PlayHandler ph
 type PlayHandler interface {
+	// Receive called in goroutine. order isn't guaranteed, you must sort segments by sequence + discontinuity sequence to persist.
 	Receive(ctx context.Context, m *MediaSegment) error
 }
 
@@ -97,8 +98,8 @@ INFINITE_LOOP:
 			// 問題が起きた場合
 			return eg.Wait()
 		default:
-			logger.Debugf("waiting media playlist about %s\n", waitNextSegment.String())
 			time.Sleep(waitNextSegment)
+			logger.Debugf("fetching media playlist (%s waited)\n", waitNextSegment.String())
 
 			resp, err := doGetWithBackoffRetry(ctx, hc, mediaPlaylist)
 			if err != nil {
@@ -139,6 +140,7 @@ INFINITE_LOOP:
 					cseg := *seg
 
 					eg.Go(func() error {
+						logger.Debugf("goroutine run for id: …%s", id[len(id)-50:])
 						return ph.Receive(ctx, &MediaSegment{
 							MediaSegment:          cseg,
 							Sequence:              cseq,
