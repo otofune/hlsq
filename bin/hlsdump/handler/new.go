@@ -116,7 +116,7 @@ func (h *handler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	// プレイリストの遅延永続化
 	eg.Go(func() error {
-		return h.deferPersistPlaylistWithoutUpdateInDuration(time.Second * time.Duration(seg.Duration))
+		return h.deferPersistPlaylistWithoutUpdateInDuration(time.Second * time.Duration(seg.Duration/2))
 	})
 	// ファイルの保存
 	eg.Go(func() error {
