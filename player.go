@@ -1,10 +1,14 @@
 package hlsq
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +50,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 		return nil, err
 	}
 	defer resp.Body.Close()
-	playlist, _, err := m3u8.DecodeFrom(resp.Body, true)
+
+	playlist, err := decodeM3U8(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +108,7 @@ INFINITE_LOOP:
 			if resp.StatusCode > 399 {
 				return fmt.Errorf("can not get media playlist, server respond with %d", resp.StatusCode)
 			}
-			pl, _, err := m3u8.DecodeFrom(resp.Body, true)
+			pl, err := decodeM3U8(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				return err
@@ -156,4 +161,24 @@ INFINITE_LOOP:
 	}
 
 	return eg.Wait()
+}
+
+func decodeM3U8(reader io.Reader) (m3u8.Playlist, error) {
+	playlistBody, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	// panic 対策
+	// m3u8.Decode は blank line があったときに media segment だと誤認する
+	// RFC8216 "Blank lines are ignored." だが、そうなっていない
+	// このとき media segment を構造体にする条件として #EXTINF が表われている必要があるコードになっている
+	// 空行の場合その条件は満たされないことがある。#EXTINF は直後の MediaSegment にのみ反映されているコードになっているためである
+	// さらに EXT-X-KEY などの全体に適用する設定がある場合、メタデータを適用する挙動がある
+	// 当然前提として MediaSegment が初期化されている前提があり、上記のようにすり抜けると panic する
+	// というわけなので、いったん空行を消して回避する
+	playlistString := strings.Join(strings.Split(string(playlistBody), "\n\n"), "\n")
+
+	pl, _, err := m3u8.Decode(*bytes.NewBufferString(playlistString), false)
+	return pl, err
 }
