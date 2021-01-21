@@ -15,12 +15,11 @@ func doGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, er
 	return hc.Do(req)
 }
 
-func doGetWithBackoffRetry(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
+func DoGetWithBackoffRetry(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
 	for i := time.Duration(0); i < 5; i++ {
 		select {
 		case <-ctx.Done():
-			err = ctx.Err()
-			return
+			return nil, ctx.Err()
 		default:
 		}
 

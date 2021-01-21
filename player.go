@@ -13,14 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// MediaSegment ms
-type MediaSegment struct {
-	m3u8.MediaSegment
-	Sequence              uint64
-	DiscontinuitySequence uint64
-	Playlist              *url.URL
-}
-
 // PlayHandler ph
 type PlayHandler interface {
 	// Receive called in goroutine. order isn't guaranteed, you must sort segments by sequence + discontinuity sequence to persist.
@@ -64,8 +56,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	eg, ctx := errgroup.WithContext(ctx)
+	cctx, cancel := context.WithCancel(ctx)
+	eg, cctx := errgroup.WithContext(cctx)
 	p := playSession{
 		cancel: cancel,
 		eg:     eg,
@@ -74,7 +66,7 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 	for _, mp := range mediaPlaylists {
 		mpu := *mp
 		eg.Go(func() error {
-			return runPilot(ctx, hc, &mpu, ph)
+			return runPilot(cctx, hc, &mpu, ph)
 		})
 	}
 
@@ -83,7 +75,8 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 
 func runPilot(ctx context.Context, hc *http.Client, mediaPlaylist *url.URL, ph PlayHandler) error {
 	// handler を goroutine で呼び出すのでそのために使う
-	eg, ctx := errgroup.WithContext(ctx)
+	// cctx はあくまで errgroup 配下に渡す、そうしないと子のエラーで意図せず親の処理が止まることになる
+	eg, cctx := errgroup.WithContext(ctx)
 
 	logger := ctxlogger.ExtractLogger(ctx)
 
@@ -95,13 +88,15 @@ INFINITE_LOOP:
 	for {
 		select {
 		case <-ctx.Done():
+			return ctx.Err()
+		case <-cctx.Done():
 			// 問題が起きた場合
 			return eg.Wait()
 		default:
 			time.Sleep(waitNextSegment)
 			logger.Debugf("fetching media playlist (%s waited)\n", waitNextSegment.String())
 
-			resp, err := doGetWithBackoffRetry(ctx, hc, mediaPlaylist)
+			resp, err := DoGetWithBackoffRetry(ctx, hc, mediaPlaylist)
 			if err != nil {
 				return err
 			}
@@ -141,7 +136,7 @@ INFINITE_LOOP:
 
 					eg.Go(func() error {
 						logger.Debugf("goroutine run for id: …%s", id[len(id)-50:])
-						return ph.Receive(ctx, &MediaSegment{
+						return ph.Receive(cctx, &MediaSegment{
 							MediaSegment:          cseg,
 							Sequence:              cseq,
 							DiscontinuitySequence: cdseq,
