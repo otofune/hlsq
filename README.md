@@ -6,4 +6,4 @@ The main goal of this project is to record streams without loss of segments.
 
 Commands
 ---
-- [`hlsdump(1)`](./bin/hlsdump)
+- [`hlsdump(1)`](./cmd/hlsdump)

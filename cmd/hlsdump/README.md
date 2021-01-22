@@ -9,6 +9,6 @@ Usage
 ---
 
 ```sh
-go get github.com/otofune/hlsq/bin/hlsdump
+go get github.com/otofune/hlsq/cmd/hlsdump
 hlsdump [playlist url] [dest directory]
 ```

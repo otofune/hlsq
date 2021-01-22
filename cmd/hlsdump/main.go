@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 
 	"github.com/otofune/hlsq"
-	"github.com/otofune/hlsq/bin/hlsdump/handler"
+	"github.com/otofune/hlsq/cmd/hlsdump/handler"
 	"github.com/otofune/hlsq/ctxdebugfs"
 	"github.com/otofune/hlsq/ctxlogger"
 )
@@ -59,6 +60,8 @@ func do(playlist *url.URL, dest string) error {
 }
 
 func main() {
+	fmt.Printf("hlsdump %s\n\n", version())
+
 	if len(os.Args) != 3 {
 		panic("You must specify 2 arguments: url, directory")
 	}
