@@ -16,6 +16,7 @@ func doGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, er
 }
 
 // TODO: 隠すかパッケージを分離する
+// TODO: タイムアウトをつける
 func DoGetWithBackoffRetry(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
 	for i := time.Duration(0); i < 5; i++ {
 		select {
