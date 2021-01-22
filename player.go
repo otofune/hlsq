@@ -123,38 +123,37 @@ INFINITE_LOOP:
 				return fmt.Errorf("unexpected playlist decoded: master playlist")
 			}
 
-			dseq := mp.DiscontinuitySeq
+			disconSeq := mp.DiscontinuitySeq
 			seq := mp.SeqNo
-			clonedMediaPlaylistURL := *mediaPlaylist
 			for _, seg := range mp.Segments {
-				if seg != nil {
-					if seg.Discontinuity {
-						dseq++
-						seq = 0
-					}
-
-					id := fmt.Sprintf("%s:%d/%d", mediaPlaylist.String(), dseq, seq)
-					if _, seen := seenSegmentSet.LoadOrStore(id, struct{}{}); seen {
-						continue // ignore
-					}
-
-					// goroutine が実行されるタイミングは不明なので、コピーして値を保持する
-					cdseq := dseq
-					cseq := seq
-					cseg := *seg
-
-					eg.Go(func() error {
-						logger.Debugf("goroutine run for id: …%s", id[len(id)-50:])
-						return ph.Receive(cctx, &MediaSegment{
-							MediaSegment:          cseg,
-							Sequence:              cseq,
-							DiscontinuitySequence: cdseq,
-							Playlist:              &clonedMediaPlaylistURL,
-						})
-					})
-
-					seq++
+				if seg == nil {
+					continue
 				}
+
+				if seg.Discontinuity {
+					disconSeq++
+					seq = 0
+				}
+				currentSeq := seq
+				seq++
+
+				id := fmt.Sprintf("%s:%d/%d", mediaPlaylist.String(), disconSeq, currentSeq)
+				if _, seen := seenSegmentSet.LoadOrStore(id, struct{}{}); seen {
+					continue // ignore
+				}
+
+				clonedMPURL := *mediaPlaylist
+				hmseg := MediaSegment{
+					MediaSegment:          *seg,
+					Sequence:              currentSeq,
+					DiscontinuitySequence: disconSeq,
+					Playlist:              &clonedMPURL,
+				}
+
+				eg.Go(func() error {
+					logger.Debugf("goroutine run for id: …%s", id[len(id)-50:])
+					return ph.Receive(cctx, &hmseg)
+				})
 			}
 
 			if mp.Closed {
