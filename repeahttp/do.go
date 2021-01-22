@@ -15,22 +15,27 @@ func ctxGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, e
 	return hc.Do(req)
 }
 
+const retryTimes = 5
+
 func Get(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
-	for i := time.Duration(0); i < 5; i++ {
+	for i := time.Duration(0); i < retryTimes; i++ {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		sec := (1 << i) >> 1 * time.Second
-		time.Sleep(sec)
-
 		if resp != nil {
 			resp.Body.Close()
 		}
 
-		resp, err = ctxGet(ctx, hc, u)
+		sec := ((1 << i) >> 1) * time.Second
+		time.Sleep(sec)
+
+		cctx, cancel := context.WithTimeout(ctx, time.Second*30)
+		defer cancel()
+
+		resp, err = ctxGet(cctx, hc, u)
 		if err != nil {
 			continue
 		}

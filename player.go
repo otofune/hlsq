@@ -40,12 +40,16 @@ func (s *playSession) Wait() error {
 }
 
 func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv FilterMediaPlaylistVariantFn, ph PlayHandler) (PlaySession, error) {
-	resp, err := repeahttp.Get(ctx, hc, playlistURL)
+	resp, err := ctxGet(ctx, hc, playlistURL)
 	if err != nil {
 		return nil, err
 	}
 	resp.Body = ctxdebugfs.Tee(ctx, resp.Body, "master.m3u8")
 	defer resp.Body.Close()
+
+	if resp.StatusCode > 399 {
+		return nil, fmt.Errorf("Failed to get master playlist: server returns %s", resp.Status)
+	}
 
 	playlist, err := decodeM3U8(resp.Body)
 	if err != nil {
