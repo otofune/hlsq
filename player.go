@@ -18,13 +18,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// PlayHandler ph
 type PlayHandler interface {
 	// Receive called in goroutine. order isn't guaranteed, you must sort segments by sequence + discontinuity sequence to persist.
 	Receive(ctx context.Context, m *MediaSegment) error
 }
 
-// PlaySession ps
 type PlaySession interface {
 	Close() error
 	Wait() error
@@ -44,7 +42,6 @@ func (s *playSession) Wait() error {
 	return s.eg.Wait()
 }
 
-// Play p
 func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv FilterMediaPlaylistVariantFn, ph PlayHandler) (PlaySession, error) {
 	resp, err := doGet(ctx, hc, playlistURL)
 	if err != nil {
