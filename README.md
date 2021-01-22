@@ -1,8 +1,8 @@
 hlsq
 ===
 
-hlsq is a toolkit to record hls streams.
-Its main goal is to record streams without lost segments.
+hlsq is a toolkit to record HLS streams.
+The main goal of this project is to record streams without loss of segments.
 
 Commands
 ---
