@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/grafov/m3u8"
+	"github.com/otofune/hlsq/ctxdebugfs"
 	"github.com/otofune/hlsq/ctxlogger"
 	"golang.org/x/sync/errgroup"
 )
@@ -49,7 +50,7 @@ func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv Filte
 	if err != nil {
 		return nil, err
 	}
-	resp.Body = transparentWriteToDebugFS(ctx, resp.Body, "master.m3u8")
+	resp.Body = ctxdebugfs.Tee(ctx, resp.Body, "master.m3u8")
 	defer resp.Body.Close()
 
 	playlist, err := decodeM3U8(resp.Body)
@@ -111,7 +112,7 @@ INFINITE_LOOP:
 			if resp.StatusCode > 399 {
 				return fmt.Errorf("can not get media playlist, server respond with %d", resp.StatusCode)
 			}
-			resp.Body = transparentWriteToDebugFS(ctx, resp.Body, fmt.Sprintf("%d.m3u8", time.Now().Unix()))
+			resp.Body = ctxdebugfs.Tee(ctx, resp.Body, fmt.Sprintf("%d.m3u8", time.Now().Unix()))
 			pl, err := decodeM3U8(resp.Body)
 			resp.Body.Close()
 			if err != nil {

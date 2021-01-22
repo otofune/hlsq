@@ -1,10 +1,8 @@
-package hlsq
+package ctxdebugfs
 
 import (
 	"context"
 	"io"
-
-	"github.com/otofune/hlsq/ctxdebugfs"
 )
 
 type teeReaderCloser struct {
@@ -26,9 +24,9 @@ func (r *teeReaderCloser) Read(p []byte) (n int, err error) {
 	return r.parent.Read(p)
 }
 
-// transparentWriteToDebugFS for debug
-func transparentWriteToDebugFS(ctx context.Context, r io.ReadCloser, filename string) io.ReadCloser {
-	fs := ctxdebugfs.ExtractDebugFS(ctx)
+// Tee read from input reader and write to output reader and DebugFSFile
+func Tee(ctx context.Context, r io.ReadCloser, filename string) io.ReadCloser {
+	fs := ExtractDebugFS(ctx)
 	if fs == nil {
 		return r
 	}
