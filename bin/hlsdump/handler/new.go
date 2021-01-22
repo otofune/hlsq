@@ -19,12 +19,17 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func New(client *http.Client, dest string) *HLSDumpHandler {
-	return &HLSDumpHandler{
-		client:     client,
-		destDir:    dest,
-		downloadSW: semaphore.NewWeighted(8),
+func New(client *http.Client, dest string) (*HLSDumpHandler, error) {
+	if err := os.MkdirAll(path.Join(dest, "segments"), 0o755); err != nil {
+		return nil, err
 	}
+
+	return &HLSDumpHandler{
+		client:         client,
+		destDir:        dest,
+		segmentDirName: "segments",
+		downloadSW:     semaphore.NewWeighted(8),
+	}, nil
 }
 
 type HLSDumpHandler struct {
