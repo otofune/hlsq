@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/otofune/hlsq"
 	"github.com/otofune/hlsq/bin/hlsdump/handler"
+	"github.com/otofune/hlsq/ctxdebugfs"
 	"github.com/otofune/hlsq/ctxlogger"
 )
 
@@ -34,21 +36,25 @@ func main() {
 		panic("You must specify 2 arguments: url, directory")
 	}
 
-	ctx := ctxlogger.WithLogger(context.Background(), ctxlogger.NewStdIOLogger())
-
 	playlist := os.Args[1]
 	dest := os.Args[2]
+	debugDest := filepath.Join(dest, "debug")
 
 	playlistURL, err := url.Parse(playlist)
 	if err != nil {
 		panic(err)
 	}
 
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	ctx := ctxlogger.WithLogger(context.Background(), ctxlogger.NewStdIOLogger())
+	ctx = ctxdebugfs.WithDebugFS(ctx, ctxdebugfs.NewOSDebugFS(debugDest))
+	if err := os.MkdirAll(debugDest, 0o755); err != nil {
 		panic(err)
 	}
 
-	h := handler.New(http.DefaultClient, dest)
+	h, err := handler.New(http.DefaultClient, dest)
+	if err != nil {
+		panic(err)
+	}
 	defer h.Close()
 
 	ses, err := hlsq.Play(ctx, http.DefaultClient, playlistURL, chooseBestOne, h)
