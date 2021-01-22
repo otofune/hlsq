@@ -1,4 +1,4 @@
-package hlsq
+package repeahttp
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func doGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, error) {
+func ctxGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -15,9 +15,7 @@ func doGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, er
 	return hc.Do(req)
 }
 
-// TODO: 隠すかパッケージを分離する
-// TODO: タイムアウトをつける
-func DoGetWithBackoffRetry(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
+func Get(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response, err error) {
 	for i := time.Duration(0); i < 5; i++ {
 		select {
 		case <-ctx.Done():
@@ -32,7 +30,7 @@ func DoGetWithBackoffRetry(ctx context.Context, hc *http.Client, u *url.URL) (re
 			resp.Body.Close()
 		}
 
-		resp, err = doGet(ctx, hc, u)
+		resp, err = ctxGet(ctx, hc, u)
 		if err != nil {
 			continue
 		}

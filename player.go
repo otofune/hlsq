@@ -11,6 +11,7 @@ import (
 	"github.com/grafov/m3u8"
 	"github.com/otofune/hlsq/ctxdebugfs"
 	"github.com/otofune/hlsq/ctxlogger"
+	"github.com/otofune/hlsq/repeahttp"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -39,7 +40,7 @@ func (s *playSession) Wait() error {
 }
 
 func Play(ctx context.Context, hc *http.Client, playlistURL *url.URL, fmpv FilterMediaPlaylistVariantFn, ph PlayHandler) (PlaySession, error) {
-	resp, err := doGet(ctx, hc, playlistURL)
+	resp, err := repeahttp.Get(ctx, hc, playlistURL)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +99,7 @@ INFINITE_LOOP:
 			time.Sleep(waitNextSegment)
 			logger.Debugf("fetching media playlist (%s waited)\n", waitNextSegment.String())
 
-			resp, err := DoGetWithBackoffRetry(ctx, hc, mediaPlaylist)
+			resp, err := repeahttp.Get(ctx, hc, mediaPlaylist)
 			if err != nil {
 				return err
 			}

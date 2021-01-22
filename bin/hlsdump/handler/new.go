@@ -15,6 +15,7 @@ import (
 
 	"github.com/otofune/hlsq"
 	"github.com/otofune/hlsq/ctxlogger"
+	"github.com/otofune/hlsq/repeahttp"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -96,7 +97,7 @@ func (h *HLSDumpHandler) saveURLTo(ctx context.Context, u *url.URL, path string)
 	if err != nil {
 		return err
 	}
-	resp, err := hlsq.DoGetWithBackoffRetry(ctx, h.client, u)
+	resp, err := repeahttp.Get(ctx, h.client, u)
 	if err != nil {
 		return err
 	}

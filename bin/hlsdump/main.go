@@ -31,6 +31,33 @@ func chooseBestOne(va []*hlsq.MediaPlaylist) []*hlsq.MediaPlaylist {
 	return []*hlsq.MediaPlaylist{mp}
 }
 
+func do(playlist *url.URL, dest string) error {
+	ctx := ctxlogger.WithLogger(context.Background(), ctxlogger.NewStdIOLogger())
+
+	debugDest := filepath.Join(dest, "debug")
+	ctx = ctxdebugfs.WithDebugFS(ctx, ctxdebugfs.NewOSDebugFS(debugDest))
+	if err := os.MkdirAll(debugDest, 0o755); err != nil {
+		return err
+	}
+
+	h, err := handler.New(http.DefaultClient, dest)
+	if err != nil {
+		return err
+	}
+	defer h.Close()
+
+	ses, err := hlsq.Play(ctx, http.DefaultClient, playlist, chooseBestOne, h)
+	if err != nil {
+		return err
+	}
+	defer ses.Close()
+
+	if err := ses.Wait(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	if len(os.Args) != 3 {
 		panic("You must specify 2 arguments: url, directory")
@@ -38,32 +65,13 @@ func main() {
 
 	playlist := os.Args[1]
 	dest := os.Args[2]
-	debugDest := filepath.Join(dest, "debug")
 
 	playlistURL, err := url.Parse(playlist)
 	if err != nil {
 		panic(err)
 	}
 
-	ctx := ctxlogger.WithLogger(context.Background(), ctxlogger.NewStdIOLogger())
-	ctx = ctxdebugfs.WithDebugFS(ctx, ctxdebugfs.NewOSDebugFS(debugDest))
-	if err := os.MkdirAll(debugDest, 0o755); err != nil {
-		panic(err)
-	}
-
-	h, err := handler.New(http.DefaultClient, dest)
-	if err != nil {
-		panic(err)
-	}
-	defer h.Close()
-
-	ses, err := hlsq.Play(ctx, http.DefaultClient, playlistURL, chooseBestOne, h)
-	if err != nil {
-		panic(err)
-	}
-	defer ses.Close()
-
-	if err := ses.Wait(); err != nil {
+	if err := do(playlistURL, dest); err != nil {
 		panic(err)
 	}
 }
