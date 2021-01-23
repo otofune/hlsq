@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/xerrors"
 )
 
 func ctxGet(ctx context.Context, hc *http.Client, u *url.URL) (*http.Response, error) {
@@ -21,7 +23,7 @@ func Get(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response,
 	for i := time.Duration(0); i < retryTimes; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, xerrors.Errorf("%w", ctx.Err())
 		default:
 		}
 
@@ -33,10 +35,10 @@ func Get(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response,
 		time.Sleep(sec)
 
 		cctx, cancel := context.WithTimeout(ctx, time.Second*30)
-		defer cancel()
-
 		resp, err = ctxGet(cctx, hc, u)
+		cancel()
 		if err != nil {
+			err = xerrors.Errorf("%w", err)
 			continue
 		}
 		if resp.StatusCode > 399 {

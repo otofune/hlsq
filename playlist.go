@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/grafov/m3u8"
+	"golang.org/x/xerrors"
 )
 
 type MediaPlaylist struct {
@@ -31,15 +32,14 @@ func selectVariants(playlistURL *url.URL, playlist m3u8.Playlist, filter FilterM
 		}
 		selected := filter(mps)
 		if len(selected) == 0 {
-			return nil, fmt.Errorf("no variants selected")
+			return nil, xerrors.Errorf("no variants selected")
 		}
 
 		var urls []*url.URL
 		for _, v := range selected {
 			u, err := url.Parse(v.URI)
 			if err != nil {
-				// TODO: wrap
-				return nil, err
+				return nil, xerrors.Errorf("%w", err)
 			}
 			// resolve relative URL
 			u = playlistURL.ResolveReference(u)
@@ -50,14 +50,14 @@ func selectVariants(playlistURL *url.URL, playlist m3u8.Playlist, filter FilterM
 	case *m3u8.MediaPlaylist:
 		return []*url.URL{playlistURL}, nil
 	default:
-		return nil, fmt.Errorf("something wrong, given m3u8 is not valid playlist")
+		return nil, xerrors.Errorf("something wrong, given m3u8 is not valid playlist")
 	}
 }
 
 func decodeM3U8(reader io.Reader) (m3u8.Playlist, error) {
 	playlistBody, err := ioutil.ReadAll(reader)
 	if err != nil {
-		return nil, err
+		return nil, xerrors.Errorf("%w", err)
 	}
 
 	// panic 対策
