@@ -34,9 +34,7 @@ func Get(ctx context.Context, hc *http.Client, u *url.URL) (resp *http.Response,
 		sec := ((1 << i) >> 1) * time.Second
 		time.Sleep(sec)
 
-		cctx, cancel := context.WithTimeout(ctx, time.Second*30)
-		resp, err = ctxGet(cctx, hc, u)
-		cancel()
+		resp, err = ctxGet(ctx, hc, u)
 		if err != nil {
 			err = xerrors.Errorf("%w", err)
 			continue

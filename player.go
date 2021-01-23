@@ -101,7 +101,6 @@ INFINITE_LOOP:
 		select {
 		case <-ctx.Done():
 			if err := ctx.Err(); err != nil {
-
 				return xerrors.Errorf("%w", err)
 			}
 			return nil
