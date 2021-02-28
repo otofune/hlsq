@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 
 	"github.com/otofune/hlsq"
-	"github.com/otofune/hlsq/cmd/hlsdump/handler"
 	"github.com/otofune/hlsq/ctxdebugfs"
 	"github.com/otofune/hlsq/ctxlogger"
+	"github.com/otofune/hlsq/examples/fshandler"
 )
 
 func chooseBestOne(va []*hlsq.MediaPlaylist) []*hlsq.MediaPlaylist {
@@ -27,7 +27,7 @@ func chooseBestOne(va []*hlsq.MediaPlaylist) []*hlsq.MediaPlaylist {
 		}
 	}
 	if mp == nil {
-		return []*hlsq.MediaPlaylist{}
+		panic("no playlist available")
 	}
 	return []*hlsq.MediaPlaylist{mp}
 }
@@ -41,7 +41,7 @@ func do(playlist *url.URL, dest string) error {
 		return err
 	}
 
-	h, err := handler.New(http.DefaultClient, dest)
+	h, err := fshandler.New(http.DefaultClient, dest)
 	if err != nil {
 		return err
 	}

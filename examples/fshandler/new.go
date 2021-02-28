@@ -1,4 +1,4 @@
-package handler
+package fshandler
 
 import (
 	"context"
@@ -97,6 +97,8 @@ func (h *HLSDumpHandler) saveURLTo(ctx context.Context, u *url.URL, path string)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+
 	resp, err := repeahttp.Get(ctx, h.client, u)
 	if err != nil {
 		return err
