@@ -4,117 +4,69 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/otofune/hlsq"
 	"github.com/otofune/hlsq/ctxlogger"
-	"github.com/otofune/hlsq/repeahttp"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
-func New(client *http.Client, dest string) (*HLSDumpHandler, error) {
+func New(client *http.Client, dest string) (*FSHandler, error) {
 	if err := os.MkdirAll(path.Join(dest, "segments"), 0o755); err != nil {
 		return nil, err
 	}
 
-	return &HLSDumpHandler{
-		client:         client,
-		destDir:        dest,
-		segmentDirName: "segments",
-		downloadSW:     semaphore.NewWeighted(8),
+	return &FSHandler{
+		segmentDirName:    "segments",
+		persistentManager: newPersistentManager(client, dest, 8),
 	}, nil
 }
 
-type HLSDumpHandler struct {
-	client         *http.Client
-	destDir        string
+type FSHandler struct {
 	segmentDirName string
+	closed         bool
 
-	segmentMutex sync.Mutex
-	segs         hlsq.MediaSegments
+	segs      hlsq.MediaSegments
+	segsMutex sync.Mutex
 
-	downloadSW *semaphore.Weighted
-	downloaded sync.Map
+	persistentManager persistentManager
 }
 
-func (h *HLSDumpHandler) append(seg *hlsq.MediaSegment) {
-	h.segmentMutex.Lock()
+var _ hlsq.PlayHandler = &FSHandler{}
+
+func (h *FSHandler) append(seg *hlsq.MediaSegment) {
+	h.segsMutex.Lock()
 	h.segs = append(h.segs, seg)
-	h.segmentMutex.Unlock()
+	h.segsMutex.Unlock()
 }
 
-func (h *HLSDumpHandler) deferPersistPlaylistWithoutUpdateInDuration(ctx context.Context, dur time.Duration) error {
+func (h *FSHandler) deferPersistPlaylistWithoutUpdateInDuration(ctx context.Context, dur time.Duration) error {
 	l := len(h.segs)
 	// debounce
 	time.Sleep(dur)
-	if l == len(h.segs) {
+	if !h.closed && l == len(h.segs) {
 		logger := ctxlogger.ExtractLogger(ctx)
 		logger.Debugf("saving live play.m3u8")
 		// 待ってもアップデートがなければ更新
-		return h.persistPlaylist(false)
+		return h.persistPlaylist(ctx, false)
 	}
 	return nil
 }
 
-func (h *HLSDumpHandler) persistPlaylist(closed bool) error {
+func (h *FSHandler) persistPlaylist(ctx context.Context, closed bool) error {
+	h.segsMutex.Lock()
 	sorted := h.segs.Sort()
-	f, err := os.OpenFile(filepath.Join(h.destDir, "play.m3u8"), os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err := f.WriteString(sorted.String(closed)); err != nil {
-		return err
-	}
-	return nil
+	h.segsMutex.Unlock()
+
+	return h.persistentManager.savePlaylist(ctx, sorted, closed)
 }
 
-func (h *HLSDumpHandler) saveURLTo(ctx context.Context, u *url.URL, path string) error {
-	logger := ctxlogger.ExtractLogger(ctx)
-
-	if _, loaded := h.downloaded.LoadOrStore(u.String(), struct{}{}); loaded {
-		logger.Debugf("skip %s cuz already got\n", path)
-		return nil // skip already got
-	}
-
-	logger.Debugf("waiting lock for saving %s\n", path)
-
-	if err := h.downloadSW.Acquire(ctx, 1); err != nil {
-		return err
-	}
-	defer h.downloadSW.Release(1)
-
-	logger.Debugf("acquired lock for saving %s\n", path)
-
-	f, err := os.OpenFile(filepath.Join(h.destDir, path), os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	resp, err := repeahttp.Get(ctx, h.client, u)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return err
-	}
-
-	logger.Debugf("saved %s\n", path)
-
-	return nil
-}
-
-func (h *HLSDumpHandler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
+func (h *FSHandler) Receive(ctx context.Context, seg *hlsq.MediaSegment) error {
 	segmentURI, err := url.Parse(seg.URI)
 	if err != nil {
 		return err
@@ -145,11 +97,11 @@ func (h *HLSDumpHandler) Receive(ctx context.Context, seg *hlsq.MediaSegment) er
 	})
 	// ファイルの保存
 	eg.Go(func() error {
-		return h.saveURLTo(ctx, segmentURI, segmentFilepath)
+		return h.persistentManager.saveURLTo(ctx, segmentURI, segmentFilepath)
 	})
 	if seg.Key != nil {
 		eg.Go(func() error {
-			return h.saveURLTo(ctx, segKeyURI, keyFilepath)
+			return h.persistentManager.saveURLTo(ctx, segKeyURI, keyFilepath)
 		})
 	}
 
@@ -157,6 +109,8 @@ func (h *HLSDumpHandler) Receive(ctx context.Context, seg *hlsq.MediaSegment) er
 }
 
 // Close vod playlist として playlist を保存する
-func (h *HLSDumpHandler) Close() error {
-	return h.persistPlaylist(true)
+func (h *FSHandler) Close() error {
+	h.closed = true
+	// TODO なんとかして logger を受けたい
+	return h.persistPlaylist(context.Background(), true)
 }
