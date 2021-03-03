@@ -17,29 +17,33 @@ type MediaSegment struct {
 
 type MediaSegments []*MediaSegment
 
+// Sort non-destructive sort
 func (mss MediaSegments) Sort() MediaSegments {
-	sort.Slice(mss, func(i, j int) bool {
-		if mss[i].DiscontinuitySequence < mss[j].DiscontinuitySequence {
+	target := make(MediaSegments, len(mss))
+	copy(target, mss)
+
+	sort.Slice(target, func(i, j int) bool {
+		if target[i].DiscontinuitySequence < target[j].DiscontinuitySequence {
 			return true
 		}
-		if mss[i].Sequence < mss[j].Sequence {
+		if target[i].Sequence < target[j].Sequence {
 			return true
 		}
 		return false
 	})
-	return mss
+	return target
 }
 
-func (mss *MediaSegments) String(closed bool) string {
+func (mss MediaSegments) String(closed bool) string {
 	if mss == nil {
 		panic("")
 	}
-	p, err := m3u8.NewMediaPlaylist(uint(len(*mss)), uint(len(*mss)))
+	p, err := m3u8.NewMediaPlaylist(uint(len(mss)), uint(len(mss)))
 	if err != nil {
 		panic(err)
 	}
 	p.Closed = closed
-	for _, seg := range *mss {
+	for _, seg := range mss {
 		mseg := seg.MediaSegment
 		p.AppendSegment(&mseg)
 	}
